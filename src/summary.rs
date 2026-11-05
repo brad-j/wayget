@@ -9,7 +9,7 @@ use std::{
     thread,
 };
 
-use crate::{launch::claude_bin, transcript};
+use crate::{index::Agent, launch::claude_bin, transcript};
 
 pub struct Done {
     pub id: String,
@@ -17,31 +17,31 @@ pub struct Done {
     pub result: Result<String, String>,
 }
 
-const PROMPT: &str = "You are helping someone pick a Claude Code session back up. \
+const PROMPT: &str = "You are helping someone pick a coding agent session back up. \
 Read the transcript below and reply with exactly three lines, no preamble, no headings, no bullets:\n\
 Line 1 starts with \"Goal:\" and says what the session was working on.\n\
 Line 2 starts with \"State:\" and says where it ended: decisions made and what was produced.\n\
 Line 3 starts with \"Open:\" and says what is unresolved or waiting on the user, or \"Nothing open.\"\n\
 Keep each line under 30 words. Use commas and periods, not dashes.\n\n<transcript>\n";
 
-const SYSTEM: &str = "You write short, plain summaries of Claude Code session transcripts.";
+const SYSTEM: &str = "You write short, plain summaries of coding agent session transcripts.";
 
-pub fn spawn(id: String, updated: i64, path: PathBuf, tx: Sender<Done>) {
+pub fn spawn(id: String, updated: i64, agent: Agent, path: PathBuf, tx: Sender<Done>) {
     thread::spawn(move || {
-        let result = run(&path);
+        let result = run(agent, &path);
         let _ = tx.send(Done { id, updated, result });
     });
 }
 
-fn run(path: &std::path::Path) -> Result<String, String> {
-    let body = transcript::plain_text(path, 60_000).map_err(|e| e.to_string())?;
+fn run(agent: Agent, path: &std::path::Path) -> Result<String, String> {
+    let body = transcript::plain_text(agent, path, 60_000).map_err(|e| e.to_string())?;
     let input = format!("{PROMPT}{body}\n</transcript>");
-    let model = std::env::var("WAYGATE_CS_SUMMARY_MODEL").unwrap_or_else(|_| "haiku".into());
+    let model = crate::env("SUMMARY_MODEL").unwrap_or_else(|| "haiku".into());
     // Strip everything a summary does not need: MCP servers, skills and tools
     // can add hundreds of thousands of tokens to every request otherwise.
     // Claude Code creates an (empty) project folder for whatever directory it
     // runs in, so run from our own cache folder to keep that to one.
-    let workdir = dirs::cache_dir().map(|d| d.join("waygate-cs")).unwrap_or_else(std::env::temp_dir);
+    let workdir = dirs::cache_dir().map(|d| d.join("wayget")).unwrap_or_else(std::env::temp_dir);
     let _ = std::fs::create_dir_all(&workdir);
     let mut child = Command::new(claude_bin())
         .args([

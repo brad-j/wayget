@@ -1,5 +1,5 @@
 //! "Waiting on me" judged by Jev, TypeSafe's yes/no model, instead of by
-//! question marks alone. Off unless `WAYGATE_CS_JEV_KEY` is set. For each
+//! question marks alone. Off unless `WAYGET_JEV_KEY` is set. For each
 //! recent session where Claude spoke last, sends the end of Claude's reply,
 //! with anything secret-shaped masked, once per session update, and caches the
 //! answer. Sessions not judged yet, or whose judgment failed, fall back to the
@@ -45,11 +45,11 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Option<Self> {
-        let var = |name: &str| std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let var = |name: &str| crate::env(name).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         Some(Self {
-            key: var("WAYGATE_CS_JEV_KEY")?,
-            url: var("WAYGATE_CS_JEV_URL").unwrap_or_else(|| DEFAULT_URL.into()),
-            model: var("WAYGATE_CS_JEV_MODEL").unwrap_or_else(|| DEFAULT_MODEL.into()),
+            key: var("JEV_KEY")?,
+            url: var("JEV_URL").unwrap_or_else(|| DEFAULT_URL.into()),
+            model: var("JEV_MODEL").unwrap_or_else(|| DEFAULT_MODEL.into()),
         })
     }
 }
@@ -71,7 +71,7 @@ pub struct Cache {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("waygate-cs").join("waiting.json"))
+    dirs::cache_dir().map(|d| d.join("wayget").join("waiting.json"))
 }
 
 impl Cache {

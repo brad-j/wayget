@@ -1,5 +1,5 @@
-//! The only state waygate-cs writes: done marks, pane widths and cached summaries.
-//! Claude Code's own files are never modified.
+//! The only state wayget writes: done marks, pane widths and cached summaries.
+//! Claude Code's and pi's own files are never modified.
 
 use std::{collections::HashMap, fs, path::PathBuf};
 
@@ -30,13 +30,13 @@ pub struct Summary {
 }
 
 fn path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("waygate-cs").join("state.json"))
+    dirs::data_dir().map(|d| d.join("wayget").join("state.json"))
 }
 
 /// Where state lived under earlier names. Read only, as a fallback until the
 /// first save writes the new path.
 fn old_paths() -> impl Iterator<Item = PathBuf> {
-    ["waygate", "cs"]
+    ["waygate-cs", "waygate", "cs"]
         .into_iter()
         .filter_map(|name| dirs::data_dir().map(|d| d.join(name).join("state.json")))
 }

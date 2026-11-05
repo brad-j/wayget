@@ -1,17 +1,17 @@
 [package]
-name = "waygate-cs"
-version = "0.5.0"
+name = "wayget"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
-description = "A terminal board for your Claude Code sessions: find, read and resume them."
+description = "A terminal board for your Claude Code and pi sessions: find, read and resume them."
 readme = "README.md"
-repository = "https://github.com/brad-j/waygate-cs"
-keywords = ["claude", "claude-code", "tui", "terminal", "sessions"]
+repository = "https://github.com/brad-j/wayget"
+keywords = ["claude", "claude-code", "pi", "tui", "sessions"]
 categories = ["command-line-utilities"]
 
 [[bin]]
-name = "waygate-cs"
+name = "wayget"
 path = "src/main.rs"
 
 [dependencies]

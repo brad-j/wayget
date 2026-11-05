@@ -1,5 +1,6 @@
-//! Reads Claude Code session transcripts (`~/.claude/projects/*/*.jsonl`) into
-//! compact summaries, with an on-disk cache keyed by file size and mtime.
+//! Reads session transcripts into compact summaries, with an on-disk cache
+//! keyed by file size and mtime. Claude Code keeps them in
+//! `~/.claude/projects/*/*.jsonl`; pi's are read by `crate::pi`.
 
 use std::{
     collections::HashMap,
@@ -13,11 +14,21 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
-const CACHE_VERSION: u32 = 4;
-const MAX_FILES: usize = 60;
+const CACHE_VERSION: u32 = 5;
+pub const MAX_FILES: usize = 60;
+
+/// The coding agent that wrote a session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Agent {
+    #[default]
+    Claude,
+    Pi,
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default)]
+    pub agent: Agent,
     pub id: String,
     pub path: PathBuf,
     pub cwd: String,
@@ -56,13 +67,13 @@ struct CacheFile {
 }
 
 pub struct Indexer {
-    root: PathBuf,
+    roots: Vec<(PathBuf, Agent)>,
     by_path: HashMap<PathBuf, Session>,
 }
 
 impl Indexer {
     pub fn load(force: bool) -> Result<Self> {
-        let root = projects_root();
+        let roots = vec![(projects_root(), Agent::Claude), (crate::pi::sessions_root(), Agent::Pi)];
         let mut by_path = HashMap::new();
         if !force
             && let Some(cache) = read_cache() {
@@ -70,10 +81,10 @@ impl Indexer {
                     by_path.insert(s.path.clone(), s);
                 }
             }
-        let mut me = Self { root, by_path };
+        let mut me = Self { roots, by_path };
         let cold = me.by_path.is_empty();
         if cold {
-            eprint!("waygate-cs: indexing sessions...");
+            eprint!("wayget: indexing sessions...");
         }
         if me.refresh()? || force {
             me.save();
@@ -84,22 +95,26 @@ impl Indexer {
         Ok(me)
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
+    /// The folders sessions are read from.
+    pub fn roots(&self) -> impl Iterator<Item = &Path> {
+        self.roots.iter().map(|(p, _)| p.as_path())
     }
 
     /// Re-reads any transcript whose size or mtime changed. Returns true if anything did.
     pub fn refresh(&mut self) -> Result<bool> {
-        let files = list_files(&self.root)?;
+        let mut files = Vec::new();
+        for (root, agent) in &self.roots {
+            files.extend(list_files(root, *agent)?);
+        }
         let mut changed = false;
         let keep: std::collections::HashSet<&PathBuf> = files.iter().map(|f| &f.0).collect();
         let before = self.by_path.len();
         self.by_path.retain(|p, _| keep.contains(p));
         changed |= self.by_path.len() != before;
 
-        let stale: Vec<&(PathBuf, u64, i64)> = files
+        let stale: Vec<&(PathBuf, u64, i64, Agent)> = files
             .iter()
-            .filter(|(p, size, mtime)| {
+            .filter(|(p, size, mtime, _)| {
                 self.by_path
                     .get(p)
                     .is_none_or(|s| s.size != *size || s.mtime != *mtime)
@@ -109,7 +124,10 @@ impl Indexer {
             changed = true;
             let parsed: Vec<Session> = stale
                 .par_iter()
-                .filter_map(|(p, size, mtime)| parse_file(p, *size, *mtime).ok())
+                .filter_map(|(p, size, mtime, agent)| match agent {
+                    Agent::Claude => parse_file(p, *size, *mtime).ok(),
+                    Agent::Pi => crate::pi::parse_file(p, *size, *mtime).ok(),
+                })
                 .collect();
             for s in parsed {
                 self.by_path.insert(s.path.clone(), s);
@@ -160,7 +178,7 @@ fn projects_root() -> PathBuf {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("waygate-cs").join("index.json"))
+    dirs::cache_dir().map(|d| d.join("wayget").join("index.json"))
 }
 
 fn read_cache() -> Option<CacheFile> {
@@ -169,7 +187,7 @@ fn read_cache() -> Option<CacheFile> {
     (cache.version == CACHE_VERSION).then_some(cache)
 }
 
-fn list_files(root: &Path) -> Result<Vec<(PathBuf, u64, i64)>> {
+fn list_files(root: &Path, agent: Agent) -> Result<Vec<(PathBuf, u64, i64, Agent)>> {
     let mut out = Vec::new();
     let dirs = match fs::read_dir(root) {
         Ok(d) => d,
@@ -184,7 +202,7 @@ fn list_files(root: &Path) -> Result<Vec<(PathBuf, u64, i64)>> {
             if p.extension().is_some_and(|x| x == "jsonl")
                 && let Ok(md) = e.metadata()
                     && md.is_file() {
-                        out.push((p, md.len(), mtime_ms(&md)));
+                        out.push((p, md.len(), mtime_ms(&md), agent));
                     }
         }
     }
@@ -498,7 +516,7 @@ fn strip_tag(s: &str, tag: &str) -> String {
 }
 
 /// True when the tail of a reply poses a question to the reader.
-fn asks_question(reply: &str) -> bool {
+pub fn asks_question(reply: &str) -> bool {
     reply
         .lines()
         .rev()

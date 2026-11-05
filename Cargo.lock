@@ -2009,8 +2009,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "waygate-cs"
-version = "0.5.0"
+name = "wayget"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",

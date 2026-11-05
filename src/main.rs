@@ -1,9 +1,10 @@
-//! waygate-cs: a terminal board for your Claude Code sessions.
+//! wayget: a terminal board for your Claude Code and pi sessions.
 
 mod app;
 mod index;
 mod launch;
 mod markdown;
+mod pi;
 mod store;
 mod summary;
 mod theme;
@@ -28,25 +29,36 @@ use ratatui::{
 use crate::{app::App, index::Indexer};
 
 const HELP: &str = "\
-waygate-cs: a terminal board for your Claude Code sessions
+wayget: a terminal board for your Claude Code and pi sessions
 
 Usage:
-  waygate-cs              open the board
-  waygate-cs --list       print sessions as plain text, newest first
-  waygate-cs --reindex    rebuild the index from scratch, then open the board
-  waygate-cs --help       this help
-  waygate-cs --version    print the version
+  wayget              open the board
+  wayget --list       print sessions as plain text, newest first
+  wayget --reindex    rebuild the index from scratch, then open the board
+  wayget --help       this help
+  wayget --version    print the version
 
 Environment:
-  CLAUDE_CONFIG_DIR          where Claude Code keeps its data (default ~/.claude)
-  WAYGATE_CS_CLAUDE          the claude binary to launch (default claude)
-  WAYGATE_CS_RESUME=here     always resume in place instead of a new tab
-  WAYGATE_CS_SUMMARY_MODEL   model for catch-me-up summaries (default haiku)
-  WAYGATE_CS_JEV_KEY         judge Waiting on me with Jev (an OrcaRouter key by default)
-  WAYGATE_CS_JEV_URL         Jev endpoint (default https://api.orcarouter.ai/v1/systemone)
-  WAYGATE_CS_JEV_MODEL       Jev model (default typesafe/jev-1.13)
+  CLAUDE_CONFIG_DIR             where Claude Code keeps its data (default ~/.claude)
+  PI_CODING_AGENT_SESSION_DIR   where pi keeps sessions (default ~/.pi/agent/sessions)
+  WAYGET_CLAUDE                 the claude binary to launch (default claude)
+  WAYGET_PI                     the pi binary to launch (default pi)
+  WAYGET_RESUME=here            always resume in place instead of a new tab
+  WAYGET_SUMMARY_MODEL          model for catch-me-up summaries (default haiku)
+  WAYGET_JEV_KEY                judge Waiting on me with Jev (an OrcaRouter key by default)
+  WAYGET_JEV_URL                Jev endpoint (default https://api.orcarouter.ai/v1/systemone)
+  WAYGET_JEV_MODEL              Jev model (default typesafe/jev-1.13)
+
+The older WAYGATE_CS_* names still work.
 
 Press ? inside the board for keys and mouse controls.";
+
+/// `WAYGET_<name>`, falling back to the name used before the rename.
+pub fn env(name: &str) -> Option<String> {
+    std::env::var(format!("WAYGET_{name}"))
+        .or_else(|_| std::env::var(format!("WAYGATE_CS_{name}")))
+        .ok()
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -58,21 +70,22 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "-V" | "--version" => {
-                println!("waygate-cs {}", env!("CARGO_PKG_VERSION"));
+                println!("wayget {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "--list" => return list(),
             "--reindex" => force = true,
-            other => bail!("unknown argument: {other} (try waygate-cs --help)"),
+            other => bail!("unknown argument: {other} (try wayget --help)"),
         }
     }
 
     let indexer = Indexer::load(force)?;
     if !stdout().is_terminal() {
-        bail!("waygate-cs needs a terminal; use waygate-cs --list for plain output");
+        bail!("wayget needs a terminal; use wayget --list for plain output");
     }
     if indexer.sessions().is_empty() {
-        println!("No Claude Code sessions found in {}", indexer.root().display());
+        let roots: Vec<String> = indexer.roots().map(|r| r.display().to_string()).collect();
+        println!("No sessions found in {}", roots.join(" or "));
         return Ok(());
     }
     let mut app = App::new(indexer);
@@ -89,9 +102,9 @@ fn main() -> Result<()> {
     ratatui::restore();
     result?;
 
-    if let Some((cwd, id, bin)) = app.exec_on_exit.take() {
-        println!("Resuming {id} in {}", app::tilde(&cwd));
-        launch::resume_here(&cwd, &id, &bin)?;
+    if let Some((cwd, cmd)) = app.exec_on_exit.take() {
+        println!("Running {} in {}", cmd.line(), app::tilde(&cwd));
+        launch::resume_here(&cwd, &cmd)?;
     }
     Ok(())
 }
@@ -138,7 +151,7 @@ fn list() -> Result<()> {
             s.id,
             index::one_line(&s.title, 70)
         );
-        // A closed pipe (waygate-cs --list | head) just means the reader has enough.
+        // A closed pipe (wayget --list | head) just means the reader has enough.
         if line.is_err() {
             break;
         }

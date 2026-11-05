@@ -94,7 +94,7 @@ fn draw_top(f: &mut Frame, app: &mut App, area: Rect) {
     let waiting = app.waiting_count();
     let live = app.live_count();
     let mut left = vec![
-        Span::styled(" ◆ waygate-cs ", theme::label()),
+        Span::styled(" ◆ wayget ", theme::label()),
         Span::styled(format!("  {} sessions", app.sessions.len()), theme::dim()),
     ];
     if waiting > 0 {
@@ -454,9 +454,13 @@ fn detail_blocks(app: &App, s: &Session, width: u16) -> Vec<(Block, Option<Link>
     }
     push(Block::new(meta));
     let cost = if s.cost > 0.0 { format!(" · ${:.2}", s.cost) } else { String::new() };
+    let agent = match s.agent {
+        crate::index::Agent::Claude => "Claude Code",
+        crate::index::Agent::Pi => "pi",
+    };
     push(Block::new(vec![Span::styled(
         format!(
-            "{} prompts{} · started {} · updated {}",
+            "{agent} · {} prompts{} · started {} · updated {}",
             s.prompts,
             cost,
             clock(s.started),
@@ -499,7 +503,7 @@ fn detail_blocks(app: &App, s: &Session, width: u16) -> Vec<(Block, Option<Link>
 
     push(section("where it left off", width));
     if s.last_reply.trim().is_empty() {
-        push(Block::new(vec![Span::styled("Claude has not replied yet.", theme::faint())]));
+        push(Block::new(vec![Span::styled("No reply yet.", theme::faint())]));
     } else {
         for b in markdown::render(&s.last_reply) {
             push(b);
@@ -572,7 +576,7 @@ fn detail_blocks(app: &App, s: &Session, width: u16) -> Vec<(Block, Option<Link>
     out.push((section("resume", width), None));
     out.push((
         Block::new(vec![Span::styled(
-            crate::launch::resume_command(&s.cwd, &s.id),
+            crate::launch::resume_command(s.agent, &s.cwd, &s.id),
             theme::faint(),
         )])
         .indent(2),
@@ -898,7 +902,7 @@ fn draw_tips(f: &mut Frame, screen: Rect) {
     let tips: &[(&str, &str)] = &[
         ("drag a border", "resize panes; grab the ┇ handle"),
         ("↵ / double-click", "resume in a new tab; R resumes here"),
-        ("amber ●", "Claude asked you something; d clears it"),
+        ("amber ●", "the agent asked you something; d clears it"),
         ("/", "search the full text of prompts and replies"),
         ("t", "read the whole transcript"),
         ("c", "short catch-up from Claude, costs a few cents"),
@@ -933,7 +937,7 @@ fn draw_tips(f: &mut Frame, screen: Rect) {
             TuiBlock::bordered()
                 .border_type(BorderType::Rounded)
                 .border_style(theme::accent())
-                .title(Line::from(Span::styled(" waygate-cs · tips ", theme::label())))
+                .title(Line::from(Span::styled(" wayget · tips ", theme::label())))
                 .style(Style::new().bg(theme::MENU_BG)),
         ),
         rect,
@@ -943,7 +947,7 @@ fn draw_tips(f: &mut Frame, screen: Rect) {
 fn draw_help(f: &mut Frame, angreal: bool, screen: Rect) {
     let mut keys: Vec<(&str, &str)> = vec![
         ("↵ / double-click", "resume in a new tab"),
-        ("R", "resume here, replacing waygate-cs"),
+        ("R", "resume here, replacing wayget"),
         ("/", "search titles, prompts and replies"),
         ("w", "toggle Waiting on me"),
         ("d / click ●", "mark done or not done"),
@@ -980,7 +984,7 @@ fn draw_help(f: &mut Frame, angreal: bool, screen: Rect) {
     }
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
-        "  ● amber: Claude asked you something   ● green: live now",
+        "  ● amber: the agent asked you something   ● green: live now",
         theme::faint(),
     )));
     f.render_widget(
@@ -988,7 +992,7 @@ fn draw_help(f: &mut Frame, angreal: bool, screen: Rect) {
             TuiBlock::bordered()
                 .border_type(BorderType::Rounded)
                 .border_style(theme::accent())
-                .title(Line::from(Span::styled(" waygate-cs · keys and mouse ", theme::label())))
+                .title(Line::from(Span::styled(" wayget · keys and mouse ", theme::label())))
                 .style(Style::new().bg(theme::MENU_BG)),
         ),
         rect,

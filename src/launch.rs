@@ -7,8 +7,36 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crate::index::Agent;
+
 pub fn claude_bin() -> String {
-    std::env::var("WAYGATE_CS_CLAUDE").unwrap_or_else(|_| "claude".into())
+    crate::env("CLAUDE").unwrap_or_else(|| "claude".into())
+}
+
+pub fn pi_bin() -> String {
+    crate::env("PI").unwrap_or_else(|| "pi".into())
+}
+
+/// A program and its arguments that reopen a session.
+#[derive(Clone)]
+pub struct Cmd {
+    pub bin: String,
+    pub args: Vec<String>,
+}
+
+impl Cmd {
+    /// How the agent that wrote a session resumes it. `bin` overrides the
+    /// program, for angreal.
+    pub fn resume(agent: Agent, id: &str, bin: Option<String>) -> Self {
+        match agent {
+            Agent::Claude => Cmd { bin: bin.unwrap_or_else(claude_bin), args: vec!["--resume".into(), id.into()] },
+            Agent::Pi => Cmd { bin: bin.unwrap_or_else(pi_bin), args: vec!["--session".into(), id.into()] },
+        }
+    }
+
+    pub fn line(&self) -> String {
+        std::iter::once(self.bin.as_str()).chain(self.args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ")
+    }
 }
 
 /// angreal, a separate Claude Code front end. Resuming in it is offered only when it is installed.
@@ -37,12 +65,12 @@ pub enum Resume {
     Here,
 }
 
-/// Opens `<bin> --resume <id>` in a new tab of the current terminal.
-pub fn resume_in_new_tab(cwd: &str, id: &str, bin: &str) -> Result<Resume, String> {
-    if std::env::var("WAYGATE_CS_RESUME").is_ok_and(|v| v == "here") {
+/// Runs `cmd` in `cwd` in a new tab of the current terminal.
+pub fn resume_in_new_tab(cwd: &str, cmd: &Cmd) -> Result<Resume, String> {
+    if crate::env("RESUME").is_some_and(|v| v == "here") {
         return Ok(Resume::Here);
     }
-    let cmd = format!("{bin} --resume {id}");
+    let cmd = cmd.line();
     if std::env::var_os("TMUX").is_some() {
         return tmux(cwd, &cmd).map(|_| Resume::Opened("tmux"));
     }
@@ -134,11 +162,11 @@ fn tmux(cwd: &str, cmd: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Replaces this process with `<bin> --resume <id>` in `cwd`.
-pub fn resume_here(cwd: &str, id: &str, bin: &str) -> anyhow::Result<()> {
+/// Replaces this process with `cmd` in `cwd`.
+pub fn resume_here(cwd: &str, resume: &Cmd) -> anyhow::Result<()> {
     std::env::set_current_dir(cwd)?;
-    let mut cmd = Command::new(bin);
-    cmd.arg("--resume").arg(id);
+    let mut cmd = Command::new(&resume.bin);
+    cmd.args(&resume.args);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -151,8 +179,8 @@ pub fn resume_here(cwd: &str, id: &str, bin: &str) -> anyhow::Result<()> {
     }
 }
 
-pub fn resume_command(cwd: &str, id: &str) -> String {
-    format!("cd {} && {} --resume {}", sh_quote(cwd), claude_bin(), id)
+pub fn resume_command(agent: Agent, cwd: &str, id: &str) -> String {
+    format!("cd {} && {}", sh_quote(cwd), Cmd::resume(agent, id, None).line())
 }
 
 pub fn open(target: &str) -> Result<(), String> {
@@ -230,6 +258,6 @@ mod tests {
     #[test]
     fn finds_binaries_on_path() {
         assert!(on_path("sh"));
-        assert!(!on_path("waygate-cs-no-such-binary"));
+        assert!(!on_path("wayget-no-such-binary"));
     }
 }

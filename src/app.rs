@@ -19,7 +19,7 @@ use ratatui::{
 use tachyonfx::EffectManager;
 
 use crate::{
-    index::{Indexer, Session},
+    index::{Agent, Indexer, Session},
     launch::{self, Resume},
     store::{Store, Summary},
     summary,
@@ -196,8 +196,8 @@ pub struct App {
     pub detail_fx: bool,
     pub view_fx: bool,
     pub quit: bool,
-    /// Folder, session id and binary to resume once the board has closed.
-    pub exec_on_exit: Option<(String, String, String)>,
+    /// Folder and command to resume once the board has closed.
+    pub exec_on_exit: Option<(String, launch::Cmd)>,
     /// Whether angreal is installed, which adds "Resume in angreal" (`A`).
     pub angreal: bool,
     last_poll: Instant,
@@ -648,9 +648,16 @@ impl App {
 
     // ----- actions -------------------------------------------------------
 
-    /// The actions offered in the menu, leaving out angreal when it is not installed.
+    /// Whether "Resume in angreal" applies: it is installed and the selected
+    /// session is Claude Code's, since angreal is a Claude Code front end.
+    pub fn angreal_here(&self) -> bool {
+        self.angreal && self.selected().is_some_and(|s| s.agent == Agent::Claude)
+    }
+
+    /// The actions offered in the menu, leaving out angreal when it does not apply.
     pub fn actions(&self) -> Vec<Action> {
-        Action::ALL.into_iter().filter(|&a| a != Action::ResumeAngreal || self.angreal).collect()
+        let angreal = self.angreal_here();
+        Action::ALL.into_iter().filter(|&a| a != Action::ResumeAngreal || angreal).collect()
     }
 
     pub fn act(&mut self, a: Action) {
@@ -664,16 +671,17 @@ impl App {
                     self.error(format!("Folder is gone: {}", tilde(&s.cwd)));
                     return;
                 }
-                let bin = if a == Action::ResumeAngreal { launch::ANGREAL.to_string() } else { launch::claude_bin() };
+                let bin = (a == Action::ResumeAngreal).then(|| launch::ANGREAL.to_string());
+                let cmd = launch::Cmd::resume(s.agent, &s.id, bin);
                 if a == Action::ResumeHere {
-                    self.exec_on_exit = Some((s.cwd, s.id, bin));
+                    self.exec_on_exit = Some((s.cwd, cmd));
                     self.quit = true;
                     return;
                 }
-                match launch::resume_in_new_tab(&s.cwd, &s.id, &bin) {
+                match launch::resume_in_new_tab(&s.cwd, &cmd) {
                     Ok(Resume::Opened(term)) => self.notify(format!("Resumed in a new {term} tab")),
                     Ok(Resume::Here) => {
-                        self.exec_on_exit = Some((s.cwd, s.id, bin));
+                        self.exec_on_exit = Some((s.cwd, cmd));
                         self.quit = true;
                     }
                     Err(e) => self.error(format!(
@@ -682,7 +690,7 @@ impl App {
                     )),
                 }
             }
-            Action::Transcript => match Transcript::load(&s.path, &s.title) {
+            Action::Transcript => match Transcript::load(s.agent, &s.path, &s.title) {
                 Ok(t) => {
                     self.transcript = Some(t);
                     self.view = View::Transcript;
@@ -698,7 +706,7 @@ impl App {
                     self.notify("Summary is up to date");
                 } else {
                     self.pending.insert(s.id.clone());
-                    summary::spawn(s.id.clone(), s.updated, s.path.clone(), self.tx.clone());
+                    summary::spawn(s.id.clone(), s.updated, s.agent, s.path.clone(), self.tx.clone());
                     self.detail_scroll = 0;
                     self.notify("Asking Claude for a summary");
                 }
@@ -719,7 +727,7 @@ impl App {
                 Some(a) => self.open(&a.url.clone()),
                 None => self.notify("No artifacts in this session"),
             },
-            Action::Copy => match launch::copy(&launch::resume_command(&s.cwd, &s.id)) {
+            Action::Copy => match launch::copy(&launch::resume_command(s.agent, &s.cwd, &s.id)) {
                 Ok(()) => self.notify("Copied resume command"),
                 Err(e) => self.error(format!("Copy failed: {e}")),
             },
@@ -866,7 +874,7 @@ impl App {
                 }
             }
             KeyCode::Char('R') => self.act(Action::ResumeHere),
-            KeyCode::Char('A') if self.angreal => self.act(Action::ResumeAngreal),
+            KeyCode::Char('A') if self.angreal_here() => self.act(Action::ResumeAngreal),
             KeyCode::Char('w') => self.toggle_waiting(),
             KeyCode::Char('d') => self.act(Action::ToggleDone),
             KeyCode::Char('o') => self.act(Action::OpenFolder),

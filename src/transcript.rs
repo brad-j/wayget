@@ -9,7 +9,7 @@ use ratatui::{
 use serde_json::Value;
 
 use crate::{
-    index::{clean_prompt, one_line, parse_ts},
+    index::{Agent, clean_prompt, one_line, parse_ts},
     markdown::{self, Block},
     theme,
 };
@@ -22,6 +22,7 @@ pub enum Entry {
 
 pub struct Transcript {
     pub title: String,
+    agent: Agent,
     pub entries: Vec<Entry>,
     pub expanded: HashSet<usize>,
     pub expand_all: bool,
@@ -35,10 +36,11 @@ pub struct Transcript {
 }
 
 impl Transcript {
-    pub fn load(path: &Path, title: &str) -> anyhow::Result<Self> {
+    pub fn load(agent: Agent, path: &Path, title: &str) -> anyhow::Result<Self> {
         Ok(Self {
             title: title.to_string(),
-            entries: load_entries(path)?,
+            agent,
+            entries: load_entries(agent, path)?,
             expanded: HashSet::new(),
             expand_all: false,
             scroll: 0,
@@ -130,7 +132,10 @@ impl Transcript {
             }
             Entry::Claude { text } => {
                 let mut v = vec![Block::new(vec![Span::styled(
-                    "◆ Claude",
+                    match self.agent {
+                        Agent::Claude => "◆ Claude",
+                        Agent::Pi => "◆ pi",
+                    },
                     theme::text().add_modifier(Modifier::BOLD),
                 )])];
                 for mut b in markdown::render(text) {
@@ -184,7 +189,25 @@ fn push_code(v: &mut Vec<Block>, text: &str, max: usize) {
     }
 }
 
-fn load_entries(path: &Path) -> anyhow::Result<Vec<Entry>> {
+fn load_entries(agent: Agent, path: &Path) -> anyhow::Result<Vec<Entry>> {
+    match agent {
+        Agent::Claude => load_claude_entries(path),
+        Agent::Pi => crate::pi::load_entries(path),
+    }
+}
+
+/// A folded tool call, before its result arrives.
+pub fn tool_entry(name: &str, input: &Value) -> Entry {
+    Entry::Tool {
+        name: tool_label(name),
+        summary: tool_summary(name, input),
+        input: tool_input_text(name, input),
+        result: None,
+        error: false,
+    }
+}
+
+fn load_claude_entries(path: &Path) -> anyhow::Result<Vec<Entry>> {
     let data = fs::read_to_string(path)?;
     let mut entries = Vec::new();
     let mut tool_at: HashMap<String, usize> = HashMap::new();
@@ -251,13 +274,7 @@ fn load_entries(path: &Path) -> anyhow::Result<Vec<Entry>> {
                         if let Some(id) = b["id"].as_str() {
                             tool_at.insert(id.to_string(), entries.len());
                         }
-                        entries.push(Entry::Tool {
-                            name: tool_label(name),
-                            summary: tool_summary(name, input),
-                            input: tool_input_text(name, input),
-                            result: None,
-                            error: false,
-                        });
+                        entries.push(tool_entry(name, input));
                     }
                     _ => {}
                 }
@@ -267,7 +284,7 @@ fn load_entries(path: &Path) -> anyhow::Result<Vec<Entry>> {
     Ok(entries)
 }
 
-fn result_text(v: &Value) -> String {
+pub fn result_text(v: &Value) -> String {
     let s = match v {
         Value::String(s) => s.clone(),
         Value::Array(parts) => parts
@@ -302,7 +319,13 @@ fn tool_summary(name: &str, input: &Value) -> String {
     let tilde = |p: String| if !home.is_empty() && p.starts_with(&home) { format!("~{}", &p[home.len()..]) } else { p };
     let s = match name {
         "Bash" => get("description").or_else(|| get("command")),
+        "bash" => get("command"),
         "Read" | "Write" | "Edit" | "MultiEdit" => get("file_path").map(tilde),
+        "read" | "write" | "edit" => get("path").map(tilde),
+        "codemode" => get("code").map(|c| c.lines().find(|l| !l.trim().is_empty() && !l.starts_with("//")).unwrap_or("").to_string()),
+        "web_search" | "source_check" => get("query").or_else(|| get("claim")),
+        "fetch_content" => get("url"),
+        "subagent" => get("agent").or_else(|| get("task")),
         "NotebookEdit" => get("notebook_path").map(tilde),
         "Grep" | "Glob" => get("pattern"),
         "WebFetch" => get("url"),
@@ -322,8 +345,9 @@ fn tool_summary(name: &str, input: &Value) -> String {
 
 fn tool_input_text(name: &str, input: &Value) -> String {
     let s = match name {
-        "Bash" => input["command"].as_str().map(str::to_string),
-        "Write" => input["content"].as_str().map(str::to_string),
+        "Bash" | "bash" => input["command"].as_str().map(str::to_string),
+        "Write" | "write" => input["content"].as_str().map(str::to_string),
+        "codemode" => input["code"].as_str().map(str::to_string),
         _ => None,
     }
     .unwrap_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default());
@@ -342,9 +366,9 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// Plain text for the summarizer: prompts and replies, no tool output.
-pub fn plain_text(path: &Path, budget: usize) -> anyhow::Result<String> {
+pub fn plain_text(agent: Agent, path: &Path, budget: usize) -> anyhow::Result<String> {
     let mut parts = Vec::new();
-    for e in load_entries(path)? {
+    for e in load_entries(agent, path)? {
         match e {
             Entry::User { text, .. } => parts.push(format!("USER: {}", truncate_chars(&text, 2500))),
             Entry::Claude { text } => parts.push(format!("CLAUDE: {}", truncate_chars(&text, 2500))),
