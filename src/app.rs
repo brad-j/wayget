@@ -19,7 +19,7 @@ use ratatui::{
 use tachyonfx::EffectManager;
 
 use crate::{
-    index::{Agent, Indexer, Session},
+    index::{Indexer, Session},
     launch::{self, Resume},
     store::{Store, Summary},
     summary,
@@ -80,7 +80,6 @@ impl Link {
 pub enum Action {
     ResumeTab,
     ResumeHere,
-    ResumeAngreal,
     Transcript,
     CatchUp,
     ToggleDone,
@@ -90,10 +89,9 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 9] = [
+    pub const ALL: [Action; 8] = [
         Action::ResumeTab,
         Action::ResumeHere,
-        Action::ResumeAngreal,
         Action::Transcript,
         Action::CatchUp,
         Action::ToggleDone,
@@ -105,7 +103,6 @@ impl Action {
         match self {
             Action::ResumeTab => ("Resume in new tab", "↵"),
             Action::ResumeHere => ("Resume here", "R"),
-            Action::ResumeAngreal => ("Resume in angreal", "A"),
             Action::Transcript => ("Transcript", "t"),
             Action::CatchUp => ("Catch me up", "c"),
             Action::ToggleDone => ("Mark done / undone", "d"),
@@ -198,8 +195,6 @@ pub struct App {
     pub quit: bool,
     /// Folder and command to resume once the board has closed.
     pub exec_on_exit: Option<(String, launch::Cmd)>,
-    /// Whether angreal is installed, which adds "Resume in angreal" (`A`).
-    pub angreal: bool,
     last_poll: Instant,
     pub now: i64,
     pub started: Instant,
@@ -299,7 +294,6 @@ impl App {
             view_fx: false,
             quit: false,
             exec_on_exit: None,
-            angreal: launch::on_path(launch::ANGREAL),
             last_poll: Instant::now(),
             now: now_ms(),
             started: Instant::now(),
@@ -648,16 +642,9 @@ impl App {
 
     // ----- actions -------------------------------------------------------
 
-    /// Whether "Resume in angreal" applies: it is installed and the selected
-    /// session is Claude Code's, since angreal is a Claude Code front end.
-    pub fn angreal_here(&self) -> bool {
-        self.angreal && self.selected().is_some_and(|s| s.agent == Agent::Claude)
-    }
-
-    /// The actions offered in the menu, leaving out angreal when it does not apply.
+    /// The actions offered in the menu.
     pub fn actions(&self) -> Vec<Action> {
-        let angreal = self.angreal_here();
-        Action::ALL.into_iter().filter(|&a| a != Action::ResumeAngreal || angreal).collect()
+        Action::ALL.to_vec()
     }
 
     pub fn act(&mut self, a: Action) {
@@ -666,13 +653,12 @@ impl App {
             return;
         };
         match a {
-            Action::ResumeTab | Action::ResumeHere | Action::ResumeAngreal => {
+            Action::ResumeTab | Action::ResumeHere => {
                 if !Path::new(&s.cwd).is_dir() {
                     self.error(format!("Folder is gone: {}", tilde(&s.cwd)));
                     return;
                 }
-                let bin = (a == Action::ResumeAngreal).then(|| launch::ANGREAL.to_string());
-                let cmd = launch::Cmd::resume(s.agent, &s.id, bin);
+                let cmd = launch::Cmd::resume(s.agent, &s.id);
                 if a == Action::ResumeHere {
                     self.exec_on_exit = Some((s.cwd, cmd));
                     self.quit = true;
@@ -874,7 +860,6 @@ impl App {
                 }
             }
             KeyCode::Char('R') => self.act(Action::ResumeHere),
-            KeyCode::Char('A') if self.angreal_here() => self.act(Action::ResumeAngreal),
             KeyCode::Char('w') => self.toggle_waiting(),
             KeyCode::Char('d') => self.act(Action::ToggleDone),
             KeyCode::Char('o') => self.act(Action::OpenFolder),

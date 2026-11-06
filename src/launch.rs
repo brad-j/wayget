@@ -3,7 +3,6 @@
 
 use std::{
     io::Write,
-    path::Path,
     process::{Command, Stdio},
 };
 
@@ -25,37 +24,17 @@ pub struct Cmd {
 }
 
 impl Cmd {
-    /// How the agent that wrote a session resumes it. `bin` overrides the
-    /// program, for angreal.
-    pub fn resume(agent: Agent, id: &str, bin: Option<String>) -> Self {
+    /// How the agent that wrote a session resumes it.
+    pub fn resume(agent: Agent, id: &str) -> Self {
         match agent {
-            Agent::Claude => Cmd { bin: bin.unwrap_or_else(claude_bin), args: vec!["--resume".into(), id.into()] },
-            Agent::Pi => Cmd { bin: bin.unwrap_or_else(pi_bin), args: vec!["--session".into(), id.into()] },
+            Agent::Claude => Cmd { bin: claude_bin(), args: vec!["--resume".into(), id.into()] },
+            Agent::Pi => Cmd { bin: pi_bin(), args: vec!["--session".into(), id.into()] },
         }
     }
 
     pub fn line(&self) -> String {
         std::iter::once(self.bin.as_str()).chain(self.args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ")
     }
-}
-
-/// angreal, a separate Claude Code front end. Resuming in it is offered only when it is installed.
-pub const ANGREAL: &str = "angreal";
-
-/// Whether `name` is an executable file in a `PATH` directory.
-pub fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| is_executable(&d.join(name))))
-}
-
-#[cfg(unix)]
-fn is_executable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(p: &Path) -> bool {
-    p.is_file()
 }
 
 pub enum Resume {
@@ -180,7 +159,7 @@ pub fn resume_here(cwd: &str, resume: &Cmd) -> anyhow::Result<()> {
 }
 
 pub fn resume_command(agent: Agent, cwd: &str, id: &str) -> String {
-    format!("cd {} && {}", sh_quote(cwd), Cmd::resume(agent, id, None).line())
+    format!("cd {} && {}", sh_quote(cwd), Cmd::resume(agent, id).line())
 }
 
 pub fn open(target: &str) -> Result<(), String> {
@@ -253,11 +232,5 @@ mod tests {
     fn quoting() {
         assert_eq!(sh_quote("it's"), r"'it'\''s'");
         assert_eq!(as_str(r#"a"b\c"#), r#"a\"b\\c"#);
-    }
-
-    #[test]
-    fn finds_binaries_on_path() {
-        assert!(on_path("sh"));
-        assert!(!on_path("wayget-no-such-binary"));
     }
 }

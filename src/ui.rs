@@ -48,7 +48,7 @@ pub fn draw(f: &mut Frame, app: &mut App, elapsed: Duration) {
         draw_tips(f, area);
     }
     if app.help {
-        draw_help(f, app.angreal, area);
+        draw_help(f, area);
     }
 
     // Effects run over whatever was drawn this frame.
@@ -944,8 +944,8 @@ fn draw_tips(f: &mut Frame, screen: Rect) {
     );
 }
 
-fn draw_help(f: &mut Frame, angreal: bool, screen: Rect) {
-    let mut keys: Vec<(&str, &str)> = vec![
+fn draw_help(f: &mut Frame, screen: Rect) {
+    let keys: Vec<(&str, &str)> = vec![
         ("↵ / double-click", "resume in a new tab"),
         ("R", "resume here, replacing wayget"),
         ("/", "search titles, prompts and replies"),
@@ -963,9 +963,6 @@ fn draw_help(f: &mut Frame, angreal: bool, screen: Rect) {
         ("r", "reindex everything"),
         ("q", "quit"),
     ];
-    if angreal {
-        keys.insert(2, ("A", "resume in angreal"));
-    }
     let w = 76.min(screen.width);
     let h = (keys.len() as u16 + 6).min(screen.height);
     let rect = Rect {
