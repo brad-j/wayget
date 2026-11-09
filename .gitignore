@@ -1,1 +1,4 @@
 target/
+
+# Claude Code per-user permissions can hold literal credentials
+.claude/settings.local.json
